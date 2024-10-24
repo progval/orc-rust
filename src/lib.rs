@@ -45,9 +45,6 @@
 //! writer.write(&batch).unwrap();
 //! writer.close().unwrap();
 //! ```
-//!
-//! See the [`datafusion`] module for information on how to integrate with
-//! [Apache DataFusion](https://datafusion.apache.org/).
 
 mod array_decoder;
 pub mod arrow_reader;
@@ -71,6 +68,3 @@ pub use arrow_reader::{ArrowReader, ArrowReaderBuilder};
 pub use arrow_writer::{ArrowWriter, ArrowWriterBuilder};
 #[cfg(feature = "async")]
 pub use async_arrow_reader::ArrowStreamReader;
-
-#[cfg(feature = "datafusion")]
-pub mod datafusion;
