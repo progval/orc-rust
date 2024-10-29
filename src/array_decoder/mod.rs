@@ -98,12 +98,12 @@ impl<T: ArrowPrimitiveType> PrimitiveArrayDecoder<T> {
             derive_present_vec(&mut self.present, parent_present, batch_size).transpose()?;
         let mut data = vec![T::Native::ZERO; batch_size];
         match present {
-            Some(present) => {
+            Some(present) if present.null_count() > 0 => {
                 self.iter.decode_spaced(data.as_mut_slice(), &present)?;
                 let array = PrimitiveArray::<T>::new(data.into(), Some(present));
                 Ok(array)
             }
-            None => {
+            _ => {
                 self.iter.decode(data.as_mut_slice())?;
                 let array = PrimitiveArray::<T>::from_iter_values(data);
                 Ok(array)
