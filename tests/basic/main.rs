@@ -659,16 +659,8 @@ pub fn no_nulls_test() {
     assert_eq!(schema, expected_file_schema);
 
     let expected_batch_schema = Arc::new(Schema::new(vec![
-        Field::new(
-            "col0",
-            DataType::Int32,
-            false,
-        ),
-        Field::new(
-            "col1",
-            DataType::Utf8,
-            false,
-        ),
+        Field::new("col0", DataType::Int32, false),
+        Field::new("col1", DataType::Utf8, false),
     ]));
     for batch in &batches {
         assert_eq!(batch.schema(), expected_batch_schema);
