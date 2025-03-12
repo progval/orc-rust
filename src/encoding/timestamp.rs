@@ -133,6 +133,8 @@ fn decode(base: i64, seconds_since_orc_base: i64, nanoseconds: i64) -> (i128, i6
     // while we encode them as a single i64 of nanoseconds in Arrow.
     let nanoseconds_since_epoch =
         (seconds as i128 * NANOSECONDS_IN_SECOND as i128) + (nanoseconds as i128);
+    // Returning seconds & nanoseconds only for error message
+    // TODO: does the error message really need those details? Can simplify by removing.
     (nanoseconds_since_epoch, seconds, nanoseconds)
 }
 

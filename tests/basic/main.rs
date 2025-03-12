@@ -615,6 +615,46 @@ pub fn decimal128_timestamps_test() {
     assert_batches_eq(&batch, &expected);
 }
 
+fn integration_path(path: &str) -> String {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    format!("{}/tests/integration/data/{}", dir, path)
+}
+
+// TODO: Move this to integration test file. Placed here because it has access to assert_batches_eq.
+//       Should make that function available to both basics & integration.
+#[test]
+pub fn decimal128_timestamps_1900_test() {
+    let path = integration_path("TestOrcFile.testDate1900.orc");
+    let f = File::open(path).expect("no file found");
+    let mut reader = ArrowReaderBuilder::try_new(f)
+        .unwrap()
+        .with_batch_size(11) // it's a big file, we don't want to test more than that
+        .with_schema(Arc::new(Schema::new(vec![
+            Field::new("time", DataType::Decimal128(38, 9), true),
+            Field::new("date", DataType::Date32, true),
+        ])))
+        .build();
+    let batch = reader.next().unwrap().unwrap();
+    let expected = [
+        "+-----------------------+------------+",
+        "| time                  | date       |",
+        "+-----------------------+------------+",
+        "| -2198229903.900000000 | 1900-12-25 |",
+        "| -2198229903.899900000 | 1900-12-25 |",
+        "| -2198229903.899800000 | 1900-12-25 |",
+        "| -2198229903.899700000 | 1900-12-25 |",
+        "| -2198229903.899600000 | 1900-12-25 |",
+        "| -2198229903.899500000 | 1900-12-25 |",
+        "| -2198229903.899400000 | 1900-12-25 |",
+        "| -2198229903.899300000 | 1900-12-25 |",
+        "| -2198229903.899200000 | 1900-12-25 |",
+        "| -2198229903.899100000 | 1900-12-25 |",
+        "| -2198229903.899000000 | 1900-12-25 |",
+        "+-----------------------+------------+",
+    ];
+    assert_batches_eq(&[batch], &expected);
+}
+
 // From https://github.com/apache/arrow-rs/blob/7705acad845e8b2a366a08640f7acb4033ed7049/arrow-flight/src/sql/metadata/mod.rs#L67-L75
 pub fn assert_batches_eq(batches: &[RecordBatch], expected_lines: &[&str]) {
     let formatted = pretty::pretty_format_batches(batches).unwrap().to_string();
