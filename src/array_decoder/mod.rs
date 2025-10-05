@@ -40,6 +40,7 @@ use crate::error::{
 use crate::proto::stream::Kind;
 use crate::schema::DataType;
 use crate::stripe::Stripe;
+use crate::RowSelection;
 
 use self::decimal::new_decimal_decoder;
 use self::list::ListArrayDecoder;
@@ -238,6 +239,8 @@ pub struct NaiveStripeDecoder {
     index: usize,
     batch_size: usize,
     number_of_rows: usize,
+    row_selection: Option<RowSelection>,
+    selection_index: usize,
 }
 
 impl Iterator for NaiveStripeDecoder {
@@ -245,11 +248,59 @@ impl Iterator for NaiveStripeDecoder {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.number_of_rows {
-            let record = self
-                .decode_next_batch(self.number_of_rows - self.index)
-                .transpose()?;
-            self.index += self.batch_size;
-            Some(record)
+            // Handle row selection if present
+            if self.row_selection.is_some() {
+                // Process selectors until we find rows to select or exhaust the selection
+                loop {
+                    let (is_skip, row_count) = {
+                        // Safety: this has been checked above
+                        let selectors = self.row_selection.as_ref().unwrap().selectors();
+                        if self.selection_index >= selectors.len() {
+                            return None;
+                        }
+                        let selector = selectors[self.selection_index];
+                        (selector.skip, selector.row_count)
+                    };
+
+                    if is_skip {
+                        // Skip these rows by advancing the index
+                        self.index += row_count;
+                        self.selection_index += 1;
+
+                        // Decode and discard the skipped rows to advance the internal decoders
+                        if let Err(e) = self.skip_rows(row_count) {
+                            return Some(Err(e));
+                        }
+                    } else {
+                        // Select these rows
+                        let rows_to_read = row_count.min(self.batch_size);
+                        let remaining = self.number_of_rows - self.index;
+                        let actual_rows = rows_to_read.min(remaining);
+
+                        if actual_rows == 0 {
+                            self.selection_index += 1;
+                            continue;
+                        }
+
+                        let record = self.decode_next_batch(actual_rows).transpose()?;
+                        self.index += actual_rows;
+
+                        // Update selector to track progress
+                        if actual_rows >= row_count {
+                            self.selection_index += 1;
+                        }
+
+                        return Some(record);
+                    }
+                }
+            } else {
+                // No row selection - decode normally
+                let record = self
+                    .decode_next_batch(self.number_of_rows - self.index)
+                    .transpose()?;
+                self.index += self.batch_size;
+                Some(record)
+            }
         } else {
             None
         }
@@ -433,6 +484,15 @@ impl NaiveStripeDecoder {
     }
 
     pub fn new(stripe: Stripe, schema_ref: SchemaRef, batch_size: usize) -> Result<Self> {
+        Self::new_with_selection(stripe, schema_ref, batch_size, None)
+    }
+
+    pub fn new_with_selection(
+        stripe: Stripe,
+        schema_ref: SchemaRef,
+        batch_size: usize,
+        row_selection: Option<RowSelection>,
+    ) -> Result<Self> {
         let number_of_rows = stripe.number_of_rows();
         let decoders = stripe
             .columns()
@@ -448,6 +508,20 @@ impl NaiveStripeDecoder {
             index: 0,
             batch_size,
             number_of_rows,
+            row_selection,
+            selection_index: 0,
         })
+    }
+
+    /// Skip the specified number of rows by decoding and discarding them
+    fn skip_rows(&mut self, count: usize) -> Result<()> {
+        // Decode in batches to avoid large memory allocations
+        let mut remaining = count;
+        while remaining > 0 {
+            let chunk = self.batch_size.min(remaining);
+            let _ = self.inner_decode_next_batch(chunk)?;
+            remaining -= chunk;
+        }
+        Ok(())
     }
 }
