@@ -51,6 +51,22 @@ impl<F: Float, R: std::io::Read> FloatDecoder<F, R> {
 }
 
 impl<F: Float, R: std::io::Read> PrimitiveValueDecoder<F> for FloatDecoder<F, R> {
+    fn skip(&mut self, n: usize) -> Result<()> {
+        let bytes_to_skip = n * std::mem::size_of::<F>();
+        let mut remaining = bytes_to_skip;
+        // TODO: use seek instead of read to avoid copying data
+        let mut buf = [0u8; 8192];
+
+        while remaining > 0 {
+            let to_read = remaining.min(buf.len());
+            self.reader
+                .read_exact(&mut buf[..to_read])
+                .context(IoSnafu)?;
+            remaining -= to_read;
+        }
+        Ok(())
+    }
+
     fn decode(&mut self, out: &mut [F]) -> Result<()> {
         let bytes = must_cast_slice_mut::<F, u8>(out);
         self.reader.read_exact(bytes).context(IoSnafu)?;
@@ -175,5 +191,118 @@ mod tests {
             f64::MAX,
             f64::INFINITY,
         ]);
+    }
+
+    #[test]
+    fn test_skip_f32() -> Result<()> {
+        // Encode 10 f32 values: [0.0, 1.5, 3.0, 4.5, 6.0, 7.5, 9.0, 10.5, 12.0, 13.5]
+        let values: Vec<f32> = (0..10).map(|i| i as f32 * 1.5).collect();
+        let mut encoder = FloatEncoder::<f32>::new();
+        encoder.write_slice(&values);
+        let bytes = encoder.take_inner();
+
+        let mut decoder = FloatDecoder::<f32, _>::new(Cursor::new(bytes));
+
+        // Decode first 3 values
+        let mut batch = vec![0.0f32; 3];
+        decoder.decode(&mut batch)?;
+        assert_eq!(batch, vec![0.0, 1.5, 3.0]);
+
+        // Skip next 4 values (4.5, 6.0, 7.5, 9.0)
+        decoder.skip(4)?;
+
+        // Decode remaining 3 values (10.5, 12.0, 13.5)
+        let mut batch = vec![0.0f32; 3];
+        decoder.decode(&mut batch)?;
+        assert_eq!(batch, vec![10.5, 12.0, 13.5]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_skip_f64() -> Result<()> {
+        // Encode 10 f64 values
+        let values: Vec<f64> = (0..10).map(|i| i as f64 * 2.5).collect();
+        let mut encoder = FloatEncoder::<f64>::new();
+        encoder.write_slice(&values);
+        let bytes = encoder.take_inner();
+
+        let mut decoder = FloatDecoder::<f64, _>::new(Cursor::new(bytes));
+
+        // Skip first 5 values
+        decoder.skip(5)?;
+
+        // Decode next 3 values
+        let mut batch = vec![0.0f64; 3];
+        decoder.decode(&mut batch)?;
+        assert_eq!(batch, vec![12.5, 15.0, 17.5]);
+
+        // Skip 1 value
+        decoder.skip(1)?;
+
+        // Decode last value
+        let mut batch = vec![0.0f64; 1];
+        decoder.decode(&mut batch)?;
+        assert_eq!(batch, vec![22.5]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_skip_all_values() -> Result<()> {
+        // Test skipping all values
+        let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let mut encoder = FloatEncoder::<f32>::new();
+        encoder.write_slice(&values);
+        let bytes = encoder.take_inner();
+
+        let mut decoder = FloatDecoder::<f32, _>::new(Cursor::new(bytes));
+
+        // Skip all 5 values
+        decoder.skip(5)?;
+
+        // Try to decode should fail (EOF)
+        let mut batch = vec![0.0f32; 1];
+        let result = decoder.decode(&mut batch);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_skip_edge_cases() -> Result<()> {
+        // Test with special float values
+        let values = vec![
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            0.0,
+            -0.0,
+            f64::MIN,
+            f64::MAX,
+        ];
+        let mut encoder = FloatEncoder::<f64>::new();
+        encoder.write_slice(&values);
+        let bytes = encoder.take_inner();
+
+        let mut decoder = FloatDecoder::<f64, _>::new(Cursor::new(bytes));
+
+        // Skip first 3 (NAN, INF, NEG_INF)
+        decoder.skip(3)?;
+
+        // Decode next 2
+        let mut batch = vec![0.0f64; 2];
+        decoder.decode(&mut batch)?;
+        assert_eq!(batch, vec![0.0, -0.0]);
+
+        // Skip 1 (MIN)
+        decoder.skip(1)?;
+
+        // Decode last (MAX)
+        let mut batch = vec![0.0f64; 1];
+        decoder.decode(&mut batch)?;
+        assert_eq!(batch, vec![f64::MAX]);
+
+        Ok(())
     }
 }

@@ -101,6 +101,10 @@ impl ArrayBatchDecoder for DecimalArrayDecoder {
         let array = Arc::new(array) as ArrayRef;
         Ok(array)
     }
+
+    fn skip_values(&mut self, n: usize, parent_present: Option<&NullBuffer>) -> Result<()> {
+        self.inner.skip_values(n, parent_present)
+    }
 }
 
 /// This iter fixes the scales of the varints decoded as scale is specified on a per
@@ -112,6 +116,12 @@ struct DecimalScaleRepairDecoder {
 }
 
 impl PrimitiveValueDecoder<i128> for DecimalScaleRepairDecoder {
+    fn skip(&mut self, n: usize) -> Result<()> {
+        self.varint_iter.skip(n)?;
+        self.scale_iter.skip(n)?;
+        Ok(())
+    }
+
     fn decode(&mut self, out: &mut [i128]) -> Result<()> {
         // TODO: can probably optimize, reuse buffers?
         let mut varint = vec![0; out.len()];

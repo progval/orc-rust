@@ -51,6 +51,9 @@ pub trait PrimitiveValueEncoder<V: Copy>: EstimateMemory {
 }
 
 pub trait PrimitiveValueDecoder<V> {
+    /// Skip the next `n` values without decoding them, failing if it cannot skip the enough values.
+    fn skip(&mut self, n: usize) -> Result<()>;
+
     /// Decode out.len() values into out at a time, failing if it cannot fill
     /// the buffer.
     fn decode(&mut self, out: &mut [V]) -> Result<()>;
@@ -95,12 +98,27 @@ mod tests {
     use super::*;
 
     /// Emits numbers increasing from 0.
-    struct DummyDecoder;
+    struct DummyDecoder {
+        value: i32,
+    }
+
+    impl DummyDecoder {
+        fn new() -> Self {
+            Self { value: 0 }
+        }
+    }
 
     impl PrimitiveValueDecoder<i32> for DummyDecoder {
+        fn skip(&mut self, n: usize) -> Result<()> {
+            self.value += n as i32;
+            Ok(())
+        }
         fn decode(&mut self, out: &mut [i32]) -> Result<()> {
-            let values = (0..out.len()).map(|x| x as i32).collect::<Vec<_>>();
+            let values = (0..out.len())
+                .map(|x| self.value + x as i32)
+                .collect::<Vec<_>>();
             out.copy_from_slice(&values);
+            self.value += out.len() as i32;
             Ok(())
         }
     }
@@ -122,7 +140,7 @@ mod tests {
     proptest! {
         #[test]
         fn decode_spaced_proptest(present: Vec<bool>) {
-            let mut decoder = DummyDecoder;
+            let mut decoder = DummyDecoder::new();
             let mut out = vec![-1; present.len()];
             decoder.decode_spaced(&mut out, &NullBuffer::from(present.clone())).unwrap();
             let expected = gen_spaced_dummy_decoder_expected(&present);
@@ -132,7 +150,7 @@ mod tests {
 
     #[test]
     fn decode_spaced_edge_cases() {
-        let mut decoder = DummyDecoder;
+        let mut decoder = DummyDecoder::new();
         let len = 10;
 
         // all present
@@ -150,5 +168,18 @@ mod tests {
         decoder.decode_spaced(&mut out, &present).unwrap();
         let expected = vec![-1; len];
         assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn test_skip() {
+        let mut decoder = DummyDecoder::new();
+        decoder.skip(10).unwrap();
+        let mut out = vec![-1; 1];
+        decoder.decode(&mut out).unwrap();
+        assert_eq!(out, vec![10]);
+        decoder.skip(10).unwrap();
+        let mut out2 = vec![-1; 5];
+        decoder.decode(&mut out2).unwrap();
+        assert_eq!(out2, vec![21, 22, 23, 24, 25]);
     }
 }
