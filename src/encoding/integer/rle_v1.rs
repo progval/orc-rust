@@ -239,7 +239,11 @@ enum RleV1EncodingState<N: NInt> {
     #[default]
     Empty,
     Literal,
-    Run { value: N, delta: i8, length: usize },
+    Run {
+        value: N,
+        delta: i8,
+        length: usize,
+    },
 }
 
 /// `RleV1Encoder` is responsible for encoding a stream of integers using the Run Length Encoding (RLE) version 1 format.
